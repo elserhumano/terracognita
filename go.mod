@@ -17,6 +17,7 @@ require (
 	github.com/hashicorp/hil v0.0.0-20190212132231-97b3a9cdfa93 // indirect
 	github.com/hashicorp/terraform v0.12.26
 	github.com/hashicorp/terraform-plugin-sdk v1.16.0
+	github.com/hashicorp/terraform-plugin-sdk/v2 v2.3.0
 	github.com/hashicorp/terraform-provider-google v1.20.1-0.20200922000057-78da461b151a
 	github.com/hashicorp/vault v1.0.3 // indirect
 	github.com/jinzhu/inflection v1.0.0
@@ -34,6 +35,10 @@ require (
 
 // Force an specific version if not the AWS provider does not compile
 replace github.com/hashicorp/aws-sdk-go-base v0.6.0 => github.com/hashicorp/aws-sdk-go-base v0.5.0
+
+// If we  go to the 1.5.0 then github.com/hashicorp/terraform-plugin-test/ will break
+// as go-getter introduced a break from 1.4 -> 1.5
+replace github.com/hashicorp/go-getter v1.5.0 => github.com/hashicorp/go-getter v1.4.0
 
 // To remove the panic issue of using TF
 replace github.com/hashicorp/terraform => github.com/cycloidio/terraform v0.13.5-cy

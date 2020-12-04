@@ -1,7 +1,6 @@
 package provider
 
 import (
-	"encoding/json"
 	"fmt"
 	"reflect"
 	"regexp"
@@ -20,7 +19,6 @@ import (
 	tfdocs "github.com/cycloidio/tfdocs/resource"
 	"github.com/hashicorp/terraform-plugin-sdk/helper/schema"
 	"github.com/hashicorp/terraform-plugin-sdk/terraform"
-	"github.com/hashicorp/terraform/configs/hcl2shim"
 	"github.com/hashicorp/terraform/providers"
 	"github.com/hashicorp/terraform/states"
 	"github.com/pkg/errors"
@@ -58,7 +56,7 @@ type Resource interface {
 	// Provider is the Provider of that Resource
 	Provider() Provider
 
-	// ImportResourceState imports the Resource state
+	// ImportState imports the Resource state
 	// to the Resource and could return []Resource if
 	// it imported more than one state, this list does not
 	// include the actual Resource on parameters, so if
@@ -245,6 +243,7 @@ func (r *resource) Read(f *filter.Filter) error {
 	if newInstanceState == nil || newInstanceState.ID == "" {
 		return errors.Wrapf(errcode.ErrProviderResourceNotRead, "the resource %q with ID %q did not return an ID", r.resourceType, r.id)
 	}
+	// Use the state.IsNull()
 
 	r.data = data
 
@@ -267,30 +266,30 @@ func (r *resource) Read(f *filter.Filter) error {
 	}
 
 	// helper/schema should always copy the ID over, but do it again just to be safe
-	newInstanceState.Attributes["id"] = newInstanceState.ID
+	//newInstanceState.Attributes["id"] = newInstanceState.ID
 
-	newStateVal, err := hcl2shim.HCL2ValueFromFlatmap(newInstanceState.Attributes, r.ImpliedType())
-	if err != nil {
-		return err
-	}
+	//newStateVal, err := hcl2shim.HCL2ValueFromFlatmap(newInstanceState.Attributes, r.ImpliedType())
+	//if err != nil {
+	//return err
+	//}
 
-	// In case it's not Imported we need a state
-	if r.state == nil {
-		r.state = &terraform.InstanceState{}
-	}
+	//// In case it's not Imported we need a state
+	//if r.state == nil {
+	//r.state = &terraform.InstanceState{}
+	//}
 
-	oldStateVal, err := hcl2shim.HCL2ValueFromFlatmap(r.state.Attributes, r.ImpliedType())
-	if err != nil {
-		return err
-	}
+	//oldStateVal, err := hcl2shim.HCL2ValueFromFlatmap(r.state.Attributes, r.ImpliedType())
+	//if err != nil {
+	//return err
+	//}
 
-	newStateVal = normalizeNullValues(newStateVal, oldStateVal, false)
-	newStateVal = copyTimeoutValues(newStateVal, oldStateVal)
+	//newStateVal = normalizeNullValues(newStateVal, oldStateVal, false)
+	//newStateVal = copyTimeoutValues(newStateVal, oldStateVal)
 
-	meta, err := json.Marshal(r.state.Meta)
-	if err != nil {
-		return err
-	}
+	//meta, err := json.Marshal(r.state.Meta)
+	//if err != nil {
+	//return err
+	//}
 
 	rio := providers.ImportedResource{
 		TypeName: r.resourceType,
