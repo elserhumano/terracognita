@@ -2,7 +2,9 @@ package provider
 
 import (
 	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/schema"
+	"github.com/hashicorp/terraform/plugin/convert"
 	"github.com/hashicorp/terraform/providers"
+	"github.com/vmihailenco/msgpack"
 )
 
 // GRPCClient is an inmemory implementation of the TF GRPC
@@ -18,6 +20,94 @@ func NewGRPCClient(pv *schema.Provider) *GRPCClient {
 	}
 }
 
+func (c *GRPCClient) ReadResource(r provider.ReadResourceRequest) provider.ReadResourceResponse {
+	logger.Trace("GRPCProvider: ReadResource")
+
+	resSchema := c.getResourceSchema(r.TypeName)
+	metaSchema := c.getProviderMetaSchema()
+
+	mp, err := msgpack.Marshal(r.PriorState, resSchema.Block.ImpliedType())
+	if err != nil {
+		resp.Diagnostics = resp.Diagnostics.Append(err)
+		return resp
+	}
+
+	protoReq := &proto.ReadResource_Request{
+		TypeName:     r.TypeName,
+		CurrentState: &proto.DynamicValue{Msgpack: mp},
+		Private:      r.Private,
+	}
+
+	if metaSchema.Block != nil {
+		metaMP, err := msgpack.Marshal(r.ProviderMeta, metaSchema.Block.ImpliedType())
+		if err != nil {
+			resp.Diagnostics = resp.Diagnostics.Append(err)
+			return resp
+		}
+		protoReq.ProviderMeta = &proto.DynamicValue{Msgpack: metaMP}
+	}
+
+	protoResp, err := p.client.ReadResource(p.ctx, protoReq)
+	if err != nil {
+		resp.Diagnostics = resp.Diagnostics.Append(grpcErr(err))
+		return resp
+	}
+	resp.Diagnostics = resp.Diagnostics.Append(convert.ProtoToDiagnostics(protoResp.Diagnostics))
+
+	state, err := decodeDynamicValue(protoResp.NewState, resSchema.Block.ImpliedType())
+	if err != nil {
+		resp.Diagnostics = resp.Diagnostics.Append(err)
+		return resp
+	}
+	resp.NewState = state
+	resp.Private = protoResp.Private
+
+	return resp
+}
+
+// getSchema is used internally to get the saved provider schema.  The schema
+// should have already been fetched from the provider, but we have to
+// synchronize access to avoid being called concurrently with GetSchema.
+func (p *GRPCClient) getSchema() providers.GetSchemaResponse {
+	c.mu.Lock()
+	// unlock inline in case GetSchema needs to be called
+	if c.schemas.Provider.Block != nil {
+		c.mu.Unlock()
+		return c.schemas
+	}
+	c.mu.Unlock()
+
+	// the schema should have been fetched already, but give it another shot
+	// just in case things are being called out of order. This may happen for
+	// tests.
+	schemas := p.GetSchema()
+	if schemas.Diagnostics.HasErrors() {
+		panic(schemas.Diagnostics.Err())
+	}
+
+	return schemas
+}
+
+// getResourceSchema is a helper to extract the schema for a resource, and
+// panics if the schema is not available.
+func (c *GRPCClient) getResourceSchema(name string) providers.Schema {
+	schema := c.getSchema()
+	resSchema, ok := schema.ResourceTypes[name]
+	if !ok {
+		panic("unknown resource type " + name)
+	}
+	return resSchema
+}
+
+// getProviderMetaSchema is a helper to extract the schema for the meta info
+// defined for a provider,
+func (c *GRPCClient) getProviderMetaSchema() providers.Schema {
+	schema := c.getSchema()
+	return schema.ProviderMeta
+}
+
+// -----
+// NopProvider is an empty implementation of the providers.Interface
 type NopProvider struct{}
 
 // GetSchema returns the complete schema for the provider.
