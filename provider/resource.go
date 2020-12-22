@@ -17,12 +17,12 @@ import (
 	azuredocs "github.com/cycloidio/tfdocs/providers/azurerm"
 	googledocs "github.com/cycloidio/tfdocs/providers/google"
 	tfdocs "github.com/cycloidio/tfdocs/resource"
-	"github.com/hashicorp/terraform-plugin-sdk/helper/schema"
-	"github.com/hashicorp/terraform-plugin-sdk/terraform"
+	"github.com/hashicorp/go-cty/cty"
+	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/schema"
+	"github.com/hashicorp/terraform-plugin-sdk/v2/terraform"
 	"github.com/hashicorp/terraform/providers"
 	"github.com/hashicorp/terraform/states"
 	"github.com/pkg/errors"
-	"github.com/zclconf/go-cty/cty"
 )
 
 //go:generate mockgen -destination=../mock/resource.go -mock_names=Resource=Resource -package mock github.com/cycloidio/terracognita/provider Resource
@@ -113,6 +113,8 @@ type resource struct {
 	configName string
 
 	resourceInstanceObject *states.ResourceInstanceObject
+
+	client providers.Interface
 }
 
 var (
@@ -132,6 +134,7 @@ func NewResource(id, rt string, p Provider) Resource {
 		id:           id,
 		resourceType: rt,
 		provider:     p,
+		client:       NewGRPCClient(p.TFProvider()),
 	}
 }
 
@@ -194,10 +197,16 @@ func (r *resource) ImportState() ([]Resource, error) {
 		logger.Log("func", "ImportState", "resource", r.Type(), "msg", "This resource it's not Importable")
 		return nil, nil
 	}
-	newInstanceStates, err := r.provider.TFProvider().ImportState(r.InstanceInfo(), r.ID())
-	if err != nil {
-		return nil, errors.Wrapf(err, "could not import resource %s with id %s", r.resourceType, r.id)
-	}
+	//newInstanceStates, err := r.provider.TFProvider().ImportState(context.Background(), r.InstanceInfo(), r.ID())
+	//if err != nil {
+	//return nil, errors.Wrapf(err, "could not import resource %s with id %s", r.resourceType, r.id)
+	//}
+	states, err := r.client.ImportResourceState(providers.ImportResourceStateRequest{
+		TypeName: r.resourceType,
+		ID:       r.id,
+	})
+	// This converts value to state so we can follow the 2 API
+	//schema.NewInstanceStateShimmedFromValue()
 
 	resources := make([]Resource, 0, len(newInstanceStates)-1)
 	// We assume that the first state is the one for this Resource
@@ -231,10 +240,26 @@ func (r *resource) Read(f *filter.Filter) error {
 	// r.provider.TFProvider().RefreshWithoutUpgrade()
 	// but that way we would not have the data and we need
 	// it to generate the HCL
-	newInstanceState, data, err := r.refreshWithoutUpgrade(r.state, r.provider.TFClient())
-	if err != nil {
-		return err
+	//newInstanceState, data, err := r.refreshWithoutUpgrade(r.state, r.provider.TFClient())
+	//if err != nil {
+	//return err
+	//}
+
+	//rio := providers.ImportedResource{
+	//TypeName: r.resourceType,
+	//Private:  meta,
+	//State:    r.state,
+	//}.AsInstanceObject()
+
+	rrr := providers.ReadResourceRequest{
+		//TypeName:   r.Type(),
+		//PriorState: rio.Value,
+		//Private:    state.Private,
+		// For now we'll not set the ProviderMeta as it's documented
+		// as experimental, so if we can make it work without it better
+		//ProviderMeta: metaConfigVal,
 	}
+	res := r.client.ReadResource(rrr)
 	r.state = newInstanceState
 
 	// The old provider API used an empty id to signal that the remote

@@ -1,16 +1,31 @@
 package provider
 
 import (
+	"context"
+	"fmt"
+	"path"
+	"runtime"
+	"sync"
+
+	"github.com/hashicorp/terraform-plugin-go/tfprotov5"
 	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/schema"
-	"github.com/hashicorp/terraform/plugin/convert"
 	"github.com/hashicorp/terraform/providers"
-	"github.com/vmihailenco/msgpack"
+	"github.com/hashicorp/terraform/tfdiags"
+	"github.com/pkg/errors"
+	"github.com/zclconf/go-cty/cty"
+	ctyjson "github.com/zclconf/go-cty/cty/json"
+	"github.com/zclconf/go-cty/cty/msgpack"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 )
 
 // GRPCClient is an inmemory implementation of the TF GRPC
 type GRPCClient struct {
 	NopProvider
 	server *schema.GRPCProviderServer
+
+	mu      sync.Mutex
+	schemas providers.GetSchemaResponse
 }
 
 func NewGRPCClient(pv *schema.Provider) *GRPCClient {
@@ -20,9 +35,7 @@ func NewGRPCClient(pv *schema.Provider) *GRPCClient {
 	}
 }
 
-func (c *GRPCClient) ReadResource(r provider.ReadResourceRequest) provider.ReadResourceResponse {
-	logger.Trace("GRPCProvider: ReadResource")
-
+func (c *GRPCClient) ReadResource(r providers.ReadResourceRequest) (resp providers.ReadResourceResponse) {
 	resSchema := c.getResourceSchema(r.TypeName)
 	metaSchema := c.getProviderMetaSchema()
 
@@ -32,9 +45,9 @@ func (c *GRPCClient) ReadResource(r provider.ReadResourceRequest) provider.ReadR
 		return resp
 	}
 
-	protoReq := &proto.ReadResource_Request{
+	protoReq := &tfprotov5.ReadResourceRequest{
 		TypeName:     r.TypeName,
-		CurrentState: &proto.DynamicValue{Msgpack: mp},
+		CurrentState: &tfprotov5.DynamicValue{MsgPack: mp},
 		Private:      r.Private,
 	}
 
@@ -44,15 +57,17 @@ func (c *GRPCClient) ReadResource(r provider.ReadResourceRequest) provider.ReadR
 			resp.Diagnostics = resp.Diagnostics.Append(err)
 			return resp
 		}
-		protoReq.ProviderMeta = &proto.DynamicValue{Msgpack: metaMP}
+		protoReq.ProviderMeta = &tfprotov5.DynamicValue{MsgPack: metaMP}
 	}
 
-	protoResp, err := p.client.ReadResource(p.ctx, protoReq)
+	protoResp, err := c.server.ReadResource(context.Background(), protoReq)
 	if err != nil {
 		resp.Diagnostics = resp.Diagnostics.Append(grpcErr(err))
 		return resp
 	}
-	resp.Diagnostics = resp.Diagnostics.Append(convert.ProtoToDiagnostics(protoResp.Diagnostics))
+	for _, d := range protoResp.Diagnostics {
+		resp.Diagnostics = resp.Diagnostics.Append(errors.New(d.Summary))
+	}
 
 	state, err := decodeDynamicValue(protoResp.NewState, resSchema.Block.ImpliedType())
 	if err != nil {
@@ -65,10 +80,45 @@ func (c *GRPCClient) ReadResource(r provider.ReadResourceRequest) provider.ReadR
 	return resp
 }
 
+func (c *GRPCClient) ImportResourceState(r providers.ImportResourceStateRequest) (resp providers.ImportResourceStateResponse) {
+	protoReq := &tfprotov5.ImportResourceStateRequest{
+		TypeName: r.TypeName,
+		ID:       r.ID,
+	}
+
+	protoResp, err := c.server.ImportResourceState(context.Background(), protoReq)
+	if err != nil {
+		resp.Diagnostics = resp.Diagnostics.Append(grpcErr(err))
+		return resp
+	}
+	for _, d := range protoResp.Diagnostics {
+		resp.Diagnostics = resp.Diagnostics.Append(errors.New(d.Summary))
+	}
+
+	for _, imported := range protoResp.ImportedResources {
+		resource := providers.ImportedResource{
+			TypeName: imported.TypeName,
+			Private:  imported.Private,
+		}
+
+		resSchema := c.getResourceSchema(resource.TypeName)
+		state, err := decodeDynamicValue(imported.State, resSchema.Block.ImpliedType())
+		if err != nil {
+			resp.Diagnostics = resp.Diagnostics.Append(err)
+			return resp
+		}
+		resource.State = state
+		resp.ImportedResources = append(resp.ImportedResources, resource)
+	}
+
+	return resp
+
+}
+
 // getSchema is used internally to get the saved provider schema.  The schema
 // should have already been fetched from the provider, but we have to
 // synchronize access to avoid being called concurrently with GetSchema.
-func (p *GRPCClient) getSchema() providers.GetSchemaResponse {
+func (c *GRPCClient) getSchema() providers.GetSchemaResponse {
 	c.mu.Lock()
 	// unlock inline in case GetSchema needs to be called
 	if c.schemas.Provider.Block != nil {
@@ -80,7 +130,7 @@ func (p *GRPCClient) getSchema() providers.GetSchemaResponse {
 	// the schema should have been fetched already, but give it another shot
 	// just in case things are being called out of order. This may happen for
 	// tests.
-	schemas := p.GetSchema()
+	schemas := c.GetSchema()
 	if schemas.Diagnostics.HasErrors() {
 		panic(schemas.Diagnostics.Err())
 	}
@@ -193,4 +243,81 @@ func (np *NopProvider) ReadDataSource(_ providers.ReadDataSourceRequest) provide
 // Close shuts down the plugin process if applicable.
 func (np *NopProvider) Close() error {
 	return nil
+}
+
+// Decode a DynamicValue from either the JSON or MsgPack encoding.
+func decodeDynamicValue(v *tfprotov5.DynamicValue, ty cty.Type) (cty.Value, error) {
+	// always return a valid value
+	var err error
+	res := cty.NullVal(ty)
+	if v == nil {
+		return res, nil
+	}
+
+	switch {
+	case len(v.MsgPack) > 0:
+		res, err = msgpack.Unmarshal(v.MsgPack, ty)
+	case len(v.JSON) > 0:
+		res, err = ctyjson.Unmarshal(v.JSON, ty)
+	}
+	return res, err
+}
+
+// grpcErr extracts some known error types and formats them into better
+// representations for core. This must only be called from plugin methods.
+// Since we don't use RPC status errors for the plugin protocol, these do not
+// contain any useful details, and we can return some text that at least
+// indicates the plugin call and possible error condition.
+func grpcErr(err error) (diags tfdiags.Diagnostics) {
+	if err == nil {
+		return
+	}
+
+	// extract the method name from the caller.
+	pc, _, _, ok := runtime.Caller(1)
+	if !ok {
+		return diags.Append(err)
+	}
+
+	f := runtime.FuncForPC(pc)
+
+	// Function names will contain the full import path. Take the last
+	// segment, which will let users know which method was being called.
+	_, requestName := path.Split(f.Name())
+
+	// TODO: while this expands the error codes into somewhat better messages,
+	// this still does not easily link the error to an actual user-recognizable
+	// plugin. The grpc plugin does not know its configured name, and the
+	// errors are in a list of diagnostics, making it hard for the caller to
+	// annotate the returned errors.
+	switch status.Code(err) {
+	case codes.Unavailable:
+		// This case is when the plugin has stopped running for some reason,
+		// and is usually the result of a crash.
+		diags = diags.Append(tfdiags.Sourceless(
+			tfdiags.Error,
+			"Plugin did not respond",
+			fmt.Sprintf("The plugin encountered an error, and failed to respond to the %s call. "+
+				"The plugin logs may contain more details.", requestName),
+		))
+	case codes.Canceled:
+		diags = diags.Append(tfdiags.Sourceless(
+			tfdiags.Error,
+			"Request cancelled",
+			fmt.Sprintf("The %s request was cancelled.", requestName),
+		))
+	case codes.Unimplemented:
+		diags = diags.Append(tfdiags.Sourceless(
+			tfdiags.Error,
+			"Unsupported plugin method",
+			fmt.Sprintf("The %s method is not supported by this plugin.", requestName),
+		))
+	default:
+		diags = diags.Append(tfdiags.Sourceless(
+			tfdiags.Error,
+			"Plugin error",
+			fmt.Sprintf("The plugin returned an unexpected error from %s: %v", requestName, err),
+		))
+	}
+	return
 }

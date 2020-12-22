@@ -16,6 +16,7 @@ require (
 	github.com/hashicorp/hcl/v2 v2.6.0
 	github.com/hashicorp/hil v0.0.0-20190212132231-97b3a9cdfa93 // indirect
 	github.com/hashicorp/terraform v0.12.26
+	github.com/hashicorp/terraform-plugin-go v0.1.0
 	github.com/hashicorp/terraform-plugin-sdk v1.16.0
 	github.com/hashicorp/terraform-plugin-sdk/v2 v2.3.0
 	github.com/hashicorp/terraform-provider-google v1.20.1-0.20200922000057-78da461b151a
@@ -29,8 +30,10 @@ require (
 	github.com/terraform-providers/terraform-provider-aws v1.60.1-0.20200807230610-d5346d47e3af
 	github.com/terraform-providers/terraform-provider-azurerm v1.44.1-0.20201029183808-d721bcc1bb55
 	github.com/terraform-providers/terraform-provider-random v2.0.0+incompatible // indirect
+	github.com/vmihailenco/msgpack v4.0.4+incompatible
 	github.com/zclconf/go-cty v1.5.1
 	google.golang.org/api v0.31.1-0.20200914161323-7b3b1fe2dc94
+	google.golang.org/grpc v1.32.0
 )
 
 // Force an specific version if not the AWS provider does not compile
