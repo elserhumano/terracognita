@@ -1,6 +1,7 @@
 package provider
 
 import (
+	"encoding/json"
 	"fmt"
 	"reflect"
 	"regexp"
@@ -102,8 +103,9 @@ type resource struct {
 
 	tfResource *schema.Resource
 
-	data  *schema.ResourceData
-	state *terraform.InstanceState
+	data       *schema.ResourceData
+	state      *terraform.InstanceState
+	stateValue *cty.Value
 
 	provider Provider
 
@@ -201,12 +203,25 @@ func (r *resource) ImportState() ([]Resource, error) {
 	//if err != nil {
 	//return nil, errors.Wrapf(err, "could not import resource %s with id %s", r.resourceType, r.id)
 	//}
-	states, err := r.client.ImportResourceState(providers.ImportResourceStateRequest{
+	irsresp := r.client.ImportResourceState(providers.ImportResourceStateRequest{
 		TypeName: r.resourceType,
 		ID:       r.id,
 	})
+	if err := irsresp.Diagnostics.Err(); err != nil {
+		return nil, errors.Wrapf(err, "could not import resource %s with id %s", r.resourceType, r.id)
+	}
 	// This converts value to state so we can follow the 2 API
-	//schema.NewInstanceStateShimmedFromValue()
+	newInstanceStates := make([]*terraform.InstanceState, 0, len(irsresp.ImportedResources))
+	for _, ir := range irsresp.ImportedResources {
+		is := terraform.NewInstanceStateShimmedFromValue(ir.State, r.TFResource().SchemaVersion)
+		// It's not set from the NewInstanceStateShimmedFromValue
+		// and we need it later on to create a new Resource
+		// as this may be different from the current Resource
+		is.Ephemeral = terraform.EphemeralState{
+			Type: ir.TypeName,
+		}
+		newInstanceStates = append(newInstanceStates)
+	}
 
 	resources := make([]Resource, 0, len(newInstanceStates)-1)
 	// We assume that the first state is the one for this Resource
@@ -227,6 +242,7 @@ func (r *resource) ImportState() ([]Resource, error) {
 			resources = append(resources, res)
 		} else {
 			r.state = is
+			r.stateValue = irsresp.ImportedResources[i].State
 		}
 
 	}
@@ -251,24 +267,24 @@ func (r *resource) Read(f *filter.Filter) error {
 	//State:    r.state,
 	//}.AsInstanceObject()
 
-	rrr := providers.ReadResourceRequest{
-		//TypeName:   r.Type(),
-		//PriorState: rio.Value,
-		//Private:    state.Private,
-		// For now we'll not set the ProviderMeta as it's documented
-		// as experimental, so if we can make it work without it better
-		//ProviderMeta: metaConfigVal,
+	rrreq := providers.ReadResourceRequest{
+		TypeName:   r.Type(),
+		PriorState: r.stateValue,
 	}
-	res := r.client.ReadResource(rrr)
+	rrres := r.client.ReadResource(rrreq)
+	if err := rrres.Diagnostics.Err(); err != nil {
+		return nil, errors.Wrapf(err, "could not read resource %s with id %s", r.resourceType, r.id)
+	}
+	newInstanceState := terraform.NewInstanceStateShimmedFromValue(rrres.NewState, r.TFResource().SchemaVersion)
 	r.state = newInstanceState
+	r.stateValue = rrres.NewState
 
 	// The old provider API used an empty id to signal that the remote
 	// object appears to have been deleted, but our new protocol expects
 	// to see a null value (in the cty sense) in that case.
-	if newInstanceState == nil || newInstanceState.ID == "" {
+	if rrres.NewState.IsNull() == nil || newInstanceState.ID == "" {
 		return errors.Wrapf(errcode.ErrProviderResourceNotRead, "the resource %q with ID %q did not return an ID", r.resourceType, r.id)
 	}
-	// Use the state.IsNull()
 
 	r.data = data
 
@@ -311,15 +327,15 @@ func (r *resource) Read(f *filter.Filter) error {
 	//newStateVal = normalizeNullValues(newStateVal, oldStateVal, false)
 	//newStateVal = copyTimeoutValues(newStateVal, oldStateVal)
 
-	//meta, err := json.Marshal(r.state.Meta)
-	//if err != nil {
-	//return err
-	//}
+	meta, err := json.Marshal(r.state.Meta)
+	if err != nil {
+		return err
+	}
 
 	rio := providers.ImportedResource{
 		TypeName: r.resourceType,
 		Private:  meta,
-		State:    newStateVal,
+		State:    rrres.NewState,
 	}.AsInstanceObject()
 
 	r.resourceInstanceObject = rio
