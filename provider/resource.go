@@ -13,6 +13,7 @@ import (
 	"github.com/cycloidio/terracognita/filter"
 	"github.com/cycloidio/terracognita/log"
 	"github.com/cycloidio/terracognita/tag"
+	"github.com/cycloidio/terracognita/util"
 	"github.com/cycloidio/terracognita/writer"
 	awsdocs "github.com/cycloidio/tfdocs/providers/aws"
 	azuredocs "github.com/cycloidio/tfdocs/providers/azurerm"
@@ -105,7 +106,7 @@ type resource struct {
 
 	data       *schema.ResourceData
 	state      *terraform.InstanceState
-	stateValue *cty.Value
+	stateValue cty.Value
 
 	provider Provider
 
@@ -116,7 +117,7 @@ type resource struct {
 
 	resourceInstanceObject *states.ResourceInstanceObject
 
-	client providers.Interface
+	client *GRPCClient
 }
 
 var (
@@ -203,7 +204,7 @@ func (r *resource) ImportState() ([]Resource, error) {
 	//if err != nil {
 	//return nil, errors.Wrapf(err, "could not import resource %s with id %s", r.resourceType, r.id)
 	//}
-	irsresp := r.client.ImportResourceState(providers.ImportResourceStateRequest{
+	irsresp := r.client.ImportResourceState(ImportResourceStateRequest{
 		TypeName: r.resourceType,
 		ID:       r.id,
 	})
@@ -267,13 +268,13 @@ func (r *resource) Read(f *filter.Filter) error {
 	//State:    r.state,
 	//}.AsInstanceObject()
 
-	rrreq := providers.ReadResourceRequest{
+	rrreq := ReadResourceRequest{
 		TypeName:   r.Type(),
 		PriorState: r.stateValue,
 	}
 	rrres := r.client.ReadResource(rrreq)
 	if err := rrres.Diagnostics.Err(); err != nil {
-		return nil, errors.Wrapf(err, "could not read resource %s with id %s", r.resourceType, r.id)
+		return errors.Wrapf(err, "could not read resource %s with id %s", r.resourceType, r.id)
 	}
 	newInstanceState := terraform.NewInstanceStateShimmedFromValue(rrres.NewState, r.TFResource().SchemaVersion)
 	r.state = newInstanceState
@@ -282,11 +283,11 @@ func (r *resource) Read(f *filter.Filter) error {
 	// The old provider API used an empty id to signal that the remote
 	// object appears to have been deleted, but our new protocol expects
 	// to see a null value (in the cty sense) in that case.
-	if rrres.NewState.IsNull() == nil || newInstanceState.ID == "" {
+	if rrres.NewState.IsNull() || newInstanceState.ID == "" {
 		return errors.Wrapf(errcode.ErrProviderResourceNotRead, "the resource %q with ID %q did not return an ID", r.resourceType, r.id)
 	}
 
-	r.data = data
+	r.data = r.TFResource().Data(r.state)
 
 	// Some resources can not be filtered by tags,
 	// so we have to do it manually
@@ -332,10 +333,15 @@ func (r *resource) Read(f *filter.Filter) error {
 		return err
 	}
 
+	zstate, err := util.HashicorpToZclonfValue(rrres.NewState, r.tfResource.CoreConfigSchema().ImpliedType())
+	if err != nil {
+		return err
+	}
+
 	rio := providers.ImportedResource{
 		TypeName: r.resourceType,
 		Private:  meta,
-		State:    rrres.NewState,
+		State:    zstate,
 	}.AsInstanceObject()
 
 	r.resourceInstanceObject = rio

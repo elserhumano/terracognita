@@ -8,7 +8,7 @@ import (
 	"github.com/cycloidio/terracognita/log"
 	"github.com/cycloidio/terracognita/provider"
 
-	"github.com/hashicorp/terraform-plugin-sdk/helper/schema"
+	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/schema"
 	tfgoogle "github.com/hashicorp/terraform-provider-google/google"
 	"github.com/pkg/errors"
 )
