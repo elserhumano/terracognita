@@ -9,9 +9,9 @@ import (
 	"github.com/cycloidio/terracognita/mock"
 	"github.com/cycloidio/terracognita/provider"
 	"github.com/cycloidio/terracognita/state"
+	"github.com/cycloidio/terracognita/util"
 	"github.com/cycloidio/terracognita/writer"
 	"github.com/golang/mock/gomock"
-	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/schema"
 	"github.com/hashicorp/terraform-plugin-sdk/v2/terraform"
 	"github.com/hashicorp/terraform/configs/hcl2shim"
 	"github.com/hashicorp/terraform/providers"
@@ -42,13 +42,16 @@ func TestWrite(t *testing.T) {
 		)
 		defer ctrl.Finish()
 
-		s, err := hcl2shim.HCL2ValueFromFlatmap(map[string]string{"name": "Pepito"}, aws.Provider().(*schema.Provider).ResourcesMap[tp].CoreConfigSchema().ImpliedType())
+		tpt, err := util.HashicorpToZclonfType(aws.Provider().ResourcesMap[tp].CoreConfigSchema().ImpliedType())
+		require.NoError(t, err)
+
+		s, err := hcl2shim.HCL2ValueFromFlatmap(map[string]string{"name": "Pepito"}, tpt)
 		require.NoError(t, err)
 
 		res.EXPECT().Type().Return(tp)
 		res.EXPECT().Provider().Return(prv)
-		res.EXPECT().TFResource().Return(aws.Provider().(*schema.Provider).ResourcesMap[tp])
-		res.EXPECT().ImpliedType().Return(aws.Provider().(*schema.Provider).ResourcesMap[tp].CoreConfigSchema().ImpliedType())
+		res.EXPECT().TFResource().Return(aws.Provider().ResourcesMap[tp])
+		res.EXPECT().ImpliedType().Return(aws.Provider().ResourcesMap[tp].CoreConfigSchema().ImpliedType())
 		res.EXPECT().ResourceInstanceObject().Return(providers.ImportedResource{
 			TypeName: tp,
 			State:    s,
@@ -95,13 +98,16 @@ func TestWrite(t *testing.T) {
 		)
 		defer ctrl.Finish()
 
-		s, err := hcl2shim.HCL2ValueFromFlatmap(map[string]string{"name": "Pepito"}, aws.Provider().(*schema.Provider).ResourcesMap[tp].CoreConfigSchema().ImpliedType())
+		tpt, err := util.HashicorpToZclonfType(aws.Provider().ResourcesMap[tp].CoreConfigSchema().ImpliedType())
+		require.NoError(t, err)
+
+		s, err := hcl2shim.HCL2ValueFromFlatmap(map[string]string{"name": "Pepito"}, tpt)
 		require.NoError(t, err)
 
 		res.EXPECT().Type().Return(tp)
 		res.EXPECT().Provider().Return(prv)
-		res.EXPECT().TFResource().Return(aws.Provider().(*schema.Provider).ResourcesMap[tp])
-		res.EXPECT().ImpliedType().Return(aws.Provider().(*schema.Provider).ResourcesMap[tp].CoreConfigSchema().ImpliedType())
+		res.EXPECT().TFResource().Return(aws.Provider().ResourcesMap[tp])
+		res.EXPECT().ImpliedType().Return(aws.Provider().ResourcesMap[tp].CoreConfigSchema().ImpliedType())
 		res.EXPECT().ResourceInstanceObject().Return(providers.ImportedResource{
 			TypeName: tp,
 			State:    s,
@@ -180,13 +186,16 @@ func TestSync(t *testing.T) {
 
 		defer ctrl.Finish()
 
-		s, err := hcl2shim.HCL2ValueFromFlatmap(map[string]string{"name": "Pepito"}, aws.Provider().(*schema.Provider).ResourcesMap[tp].CoreConfigSchema().ImpliedType())
+		tpt, err := util.HashicorpToZclonfType(aws.Provider().ResourcesMap[tp].CoreConfigSchema().ImpliedType())
+		require.NoError(t, err)
+
+		s, err := hcl2shim.HCL2ValueFromFlatmap(map[string]string{"name": "Pepito"}, tpt)
 		require.NoError(t, err)
 
 		res.EXPECT().Type().Return(tp)
 		res.EXPECT().Provider().Return(prv)
-		res.EXPECT().TFResource().Return(aws.Provider().(*schema.Provider).ResourcesMap[tp])
-		res.EXPECT().ImpliedType().Return(aws.Provider().(*schema.Provider).ResourcesMap[tp].CoreConfigSchema().ImpliedType())
+		res.EXPECT().TFResource().Return(aws.Provider().ResourcesMap[tp])
+		res.EXPECT().ImpliedType().Return(aws.Provider().ResourcesMap[tp].CoreConfigSchema().ImpliedType())
 		res.EXPECT().ResourceInstanceObject().Return(providers.ImportedResource{
 			TypeName: tp,
 			State:    s,
@@ -295,15 +304,20 @@ func TestDependencies(t *testing.T) {
 
 		defer ctrl.Finish()
 
-		stateSG, err := hcl2shim.HCL2ValueFromFlatmap(map[string]string{"id": "sg-1234", "name": "sg"}, aws.Provider().(*schema.Provider).ResourcesMap[sg].CoreConfigSchema().ImpliedType())
-		stateSGR, err := hcl2shim.HCL2ValueFromFlatmap(map[string]string{"security_group_id": "sg-1234", "id": "sgrule-1234"}, aws.Provider().(*schema.Provider).ResourcesMap[sgr].CoreConfigSchema().ImpliedType())
+		sgt, err := util.HashicorpToZclonfType(aws.Provider().ResourcesMap[sg].CoreConfigSchema().ImpliedType())
+		require.NoError(t, err)
+		sgrt, err := util.HashicorpToZclonfType(aws.Provider().ResourcesMap[sgr].CoreConfigSchema().ImpliedType())
+		require.NoError(t, err)
+
+		stateSG, err := hcl2shim.HCL2ValueFromFlatmap(map[string]string{"id": "sg-1234", "name": "sg"}, sgt)
+		stateSGR, err := hcl2shim.HCL2ValueFromFlatmap(map[string]string{"security_group_id": "sg-1234", "id": "sgrule-1234"}, sgrt)
 
 		require.NoError(t, err)
 
 		resSG.EXPECT().Type().Return(sg)
 		resSG.EXPECT().Provider().Return(prv)
-		resSG.EXPECT().TFResource().Return(aws.Provider().(*schema.Provider).ResourcesMap[sg])
-		resSG.EXPECT().ImpliedType().Return(aws.Provider().(*schema.Provider).ResourcesMap[sg].CoreConfigSchema().ImpliedType())
+		resSG.EXPECT().TFResource().Return(aws.Provider().ResourcesMap[sg])
+		resSG.EXPECT().ImpliedType().Return(aws.Provider().ResourcesMap[sg].CoreConfigSchema().ImpliedType())
 		resSG.EXPECT().ResourceInstanceObject().Return(providers.ImportedResource{
 			TypeName: sg,
 			State:    stateSG,
@@ -317,8 +331,8 @@ func TestDependencies(t *testing.T) {
 
 		resSGR.EXPECT().Type().Return(sgr).AnyTimes()
 		resSGR.EXPECT().Provider().Return(prv)
-		resSGR.EXPECT().TFResource().Return(aws.Provider().(*schema.Provider).ResourcesMap[sgr])
-		resSGR.EXPECT().ImpliedType().Return(aws.Provider().(*schema.Provider).ResourcesMap[sgr].CoreConfigSchema().ImpliedType())
+		resSGR.EXPECT().TFResource().Return(aws.Provider().ResourcesMap[sgr])
+		resSGR.EXPECT().ImpliedType().Return(aws.Provider().ResourcesMap[sgr].CoreConfigSchema().ImpliedType())
 		resSGR.EXPECT().ResourceInstanceObject().Return(providers.ImportedResource{
 			TypeName: sgr,
 			State:    stateSGR,
@@ -429,15 +443,20 @@ func TestDependencies(t *testing.T) {
 
 		defer ctrl.Finish()
 
-		stateSG, err := hcl2shim.HCL2ValueFromFlatmap(map[string]string{"id": "sg-1234", "name": "sg"}, aws.Provider().(*schema.Provider).ResourcesMap[sg].CoreConfigSchema().ImpliedType())
-		stateSGR, err := hcl2shim.HCL2ValueFromFlatmap(map[string]string{"security_group_id": "sg-1234", "id": "sgrule-1234"}, aws.Provider().(*schema.Provider).ResourcesMap[sgr].CoreConfigSchema().ImpliedType())
+		sgt, err := util.HashicorpToZclonfType(aws.Provider().ResourcesMap[sg].CoreConfigSchema().ImpliedType())
+		require.NoError(t, err)
+		sgrt, err := util.HashicorpToZclonfType(aws.Provider().ResourcesMap[sgr].CoreConfigSchema().ImpliedType())
+		require.NoError(t, err)
+
+		stateSG, err := hcl2shim.HCL2ValueFromFlatmap(map[string]string{"id": "sg-1234", "name": "sg"}, sgt)
+		stateSGR, err := hcl2shim.HCL2ValueFromFlatmap(map[string]string{"security_group_id": "sg-1234", "id": "sgrule-1234"}, sgrt)
 
 		require.NoError(t, err)
 
 		resSG.EXPECT().Type().Return(sg)
 		resSG.EXPECT().Provider().Return(prv)
-		resSG.EXPECT().TFResource().Return(aws.Provider().(*schema.Provider).ResourcesMap[sg])
-		resSG.EXPECT().ImpliedType().Return(aws.Provider().(*schema.Provider).ResourcesMap[sg].CoreConfigSchema().ImpliedType())
+		resSG.EXPECT().TFResource().Return(aws.Provider().ResourcesMap[sg])
+		resSG.EXPECT().ImpliedType().Return(aws.Provider().ResourcesMap[sg].CoreConfigSchema().ImpliedType())
 		resSG.EXPECT().ResourceInstanceObject().Return(providers.ImportedResource{
 			TypeName: sg,
 			State:    stateSG,
@@ -447,8 +466,8 @@ func TestDependencies(t *testing.T) {
 
 		resSGR.EXPECT().Type().Return(sgr)
 		resSGR.EXPECT().Provider().Return(prv)
-		resSGR.EXPECT().TFResource().Return(aws.Provider().(*schema.Provider).ResourcesMap[sgr])
-		resSGR.EXPECT().ImpliedType().Return(aws.Provider().(*schema.Provider).ResourcesMap[sgr].CoreConfigSchema().ImpliedType())
+		resSGR.EXPECT().TFResource().Return(aws.Provider().ResourcesMap[sgr])
+		resSGR.EXPECT().ImpliedType().Return(aws.Provider().ResourcesMap[sgr].CoreConfigSchema().ImpliedType())
 		resSGR.EXPECT().ResourceInstanceObject().Return(providers.ImportedResource{
 			TypeName: sgr,
 			State:    stateSGR,

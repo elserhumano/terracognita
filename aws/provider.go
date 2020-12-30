@@ -55,7 +55,7 @@ func NewProvider(ctx context.Context, accessKey, secretKey, region, sessionToken
 		return nil, fmt.Errorf("could not initialize 'terraform/aws.Config.Client()' because: %s", err)
 	}
 
-	tfp := tfaws.Provider().(*schema.Provider)
+	tfp := tfaws.Provider()
 	tfp.SetMeta(awsClient)
 
 	return &aws{
