@@ -9,7 +9,7 @@ import (
 	"github.com/cycloidio/terracognita/provider"
 
 	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/schema"
-	tfgoogle "github.com/hashicorp/terraform-provider-google/google"
+	tfgoogle "github.com/hashicorp/terraform-provider-google/v3/google"
 	"github.com/pkg/errors"
 )
 
@@ -33,7 +33,7 @@ func NewProvider(ctx context.Context, maxResults uint64, project, region, creden
 		return nil, fmt.Errorf("could not initialize 'terraform/google.Config.LoadAndValidate()' because: %s", err)
 	}
 
-	tfp := tfgoogle.Provider().(*schema.Provider)
+	tfp := tfgoogle.Provider()
 	tfp.SetMeta(&cfg)
 
 	log.Get().Log("func", "google.NewProvider", "msg", "loading GCP client")
